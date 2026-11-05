@@ -16,7 +16,8 @@
     "test:auth-api": "node scripts/test-auth-api.mjs",
     "test:auth-isolated": "node scripts/test-auth-isolated.mjs",
     "test:crud-api": "node scripts/test-crud-api.mjs",
-    "test:crud-isolated": "node scripts/test-auth-isolated.mjs --crud"
+    "test:crud-isolated": "node scripts/test-auth-isolated.mjs --crud",
+    "test:workflow-isolated": "node scripts/test-auth-isolated.mjs --workflow"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.119.0",

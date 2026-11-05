@@ -8,6 +8,9 @@ import { TaskEditor } from '@/features/crm/ui/TaskEditor'
 import { DeleteAction } from '@/features/crm/ui/DeleteAction'
 import { QueryFeedback } from '@/features/crm/ui/QueryFeedback'
 import { Placeholder } from '@/shared/ui/Placeholder'
+import { WorkflowActions } from '@/features/crm/ui/WorkflowActions'
+import { ReassignTask } from '@/features/crm/ui/ReassignTask'
+import { TaskHistory } from '@/features/crm/ui/TaskHistory'
 
 export function TaskPage() {
   const taskId = useParams().taskId!
@@ -21,9 +24,12 @@ export function TaskPage() {
     {task && <div className="space-y-4">
       <h2 className="text-xl font-semibold [overflow-wrap:anywhere]">{task.title}</h2><Badge variant="secondary">{statusLabels[task.status]}</Badge>
       <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{task.description || 'Описание не добавлено.'}</p>
-      <dl className="space-y-2 text-sm [overflow-wrap:anywhere]"><div><dt className="font-semibold">Автор</dt><dd>{task.author_id}{task.author_id === userId && ' (вы)'}</dd></div><div><dt className="font-semibold">Исполнитель</dt><dd>{task.assignee_id}{task.assignee_id === userId && ' (вы)'}</dd></div><div><dt className="font-semibold">Создана</dt><dd>{new Date(task.created_at).toLocaleString('ru-RU')}</dd></div></dl>
+      <dl className="space-y-2 text-sm [overflow-wrap:anywhere]"><div><dt className="font-semibold">Автор</dt><dd>{task.author_email || task.author_id}{task.author_id === userId && ' (вы)'}</dd></div><div><dt className="font-semibold">Исполнитель</dt><dd>{task.assignee_email || task.assignee_id}{task.assignee_id === userId && ' (вы)'}</dd></div><div><dt className="font-semibold">Создана</dt><dd>{new Date(task.created_at).toLocaleString('ru-RU')}</dd></div></dl>
       <Link className="inline-block text-primary underline" to={`/objects/${task.object_id}`}>К объекту</Link>
+      <WorkflowActions task={task} />
+      {manager && <ReassignTask task={task} />}
       {manager && <div className="flex flex-wrap gap-3"><TaskEditor task={task} objectId={task.object_id} /><DeleteAction label="Удалить задачу" description="Задача и её история будут удалены без возможности восстановления." remove={() => deleteTask(task.id)} onRemoved={() => navigate(`/objects/${task.object_id}`, { replace: true })} /></div>}
+      <TaskHistory taskId={task.id} />
     </div>}
   </Placeholder>
 }

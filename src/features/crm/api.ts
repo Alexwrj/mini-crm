@@ -5,10 +5,15 @@ export type TaskStatus = 'new' | 'in_progress' | 'in_review' | 'accepted' | 'rew
 export type CrmTask = {
   id: string; object_id: string; assignee_id: string; author_id: string
   title: string; description: string | null; status: TaskStatus; created_at: string
+  author_email?: string | null; assignee_email?: string | null
 }
 export type Executor = { id: string; email: string }
 export type ObjectInput = Pick<CrmObject, 'name' | 'address'>
 export type TaskInput = Pick<CrmTask, 'title' | 'description'>
+export type TaskHistory = {
+  id: string; task_id: string; actor_id: string; actor_email: string | null; from_status: TaskStatus | null
+  to_status: TaskStatus; comment: string | null; created_at: string
+}
 
 function client() {
   if (!supabase) throw new Error('Supabase не настроен.')
@@ -16,6 +21,8 @@ function client() {
 }
 
 function fail(error: { code?: string; message: string }) {
+  if (error.code === '40001') throw new Error('Состояние задачи изменилось или переход недоступен. Проверьте обновлённые данные.')
+  if (error.code === '22023') throw new Error('Для возврата на доработку нужен непустой комментарий.')
   if (error.code === '23514') throw new Error('Проверьте обязательные поля и выбранного исполнителя.')
   if (error.code === '23503') throw new Error('Связанная запись удалена или не существует. Обновите страницу.')
   if (error.code === '42501') throw new Error('Недостаточно прав для этой операции.')
@@ -46,7 +53,7 @@ export async function getTasks(filter: { objectId?: string; assigneeId?: string 
   return (data ?? []) as CrmTask[]
 }
 export async function getTask(id: string, signal?: AbortSignal): Promise<CrmTask | null> {
-  const query = client().from('tasks').select(taskFields).eq('id', id)
+  const query = client().rpc('read_task', { p_task_id: id })
   const { data, error } = await (signal ? query.abortSignal(signal) : query).maybeSingle()
   if (error) fail(error)
   return data as CrmTask | null
@@ -87,4 +94,21 @@ export async function deleteTask(id: string) {
   const { data, error } = await client().from('tasks').delete().eq('id', id).select('id')
   if (error) fail(error)
   if (!data?.length) throw new Error('Задача уже удалена или недоступна.')
+}
+
+export async function transitionTask(taskId: string, target: TaskStatus, comment: string | null): Promise<CrmTask> {
+  const { data, error } = await client().rpc('transition_task', { p_task_id: taskId, p_target_status: target, p_comment: comment }).single()
+  if (error) fail(error)
+  return data as CrmTask
+}
+export async function reassignTask(taskId: string, assigneeId: string): Promise<CrmTask> {
+  const { data, error } = await client().rpc('reassign_task', { p_task_id: taskId, p_assignee_id: assigneeId }).single()
+  if (error) fail(error)
+  return data as CrmTask
+}
+export async function getTaskHistory(taskId: string, signal?: AbortSignal): Promise<TaskHistory[]> {
+  const query = client().rpc('read_task_history', { p_task_id: taskId })
+  const { data, error } = await (signal ? query.abortSignal(signal) : query)
+  if (error) fail(error)
+  return (data ?? []) as TaskHistory[]
 }

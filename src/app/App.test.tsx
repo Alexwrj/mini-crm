@@ -18,6 +18,7 @@ vi.mock('@/features/crm/api', () => {
     getExecutors: vi.fn(async () => [{ id: 'executor-id', email: 'executor-a@mini-crm.test' }]),
     createObject: vi.fn(async () => object), updateObject: vi.fn(async () => object), deleteObject: vi.fn(async () => {}),
     createTask: vi.fn(async () => task), updateTask: vi.fn(async () => task), deleteTask: vi.fn(async () => {}),
+    getTaskHistory: vi.fn(async () => []), transitionTask: vi.fn(async () => task), reassignTask: vi.fn(async () => task),
   }
 })
 
