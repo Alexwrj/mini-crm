@@ -1,11 +1,25 @@
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, useLocation } from 'react-router'
+import { StrictMode } from 'react'
 import type { AuthChangeEvent, Session, SupabaseClient } from '@supabase/supabase-js'
 import { describe, expect, it, vi } from 'vitest'
 import { App } from './App'
 import { AuthProvider } from './providers/AuthProvider'
 import type { Profile } from '@/features/auth/model/auth-context'
+import * as crm from '@/features/crm/api'
+
+vi.mock('@/features/crm/api', () => {
+  const object = { id: 'object-123', name: 'Объект теста', address: 'Адрес', created_at: '2026-11-05T00:00:00Z' }
+  const task = { id: 'task-456', object_id: object.id, title: 'Задача теста', description: null, status: 'new', author_id: 'manager-id', assignee_id: 'executor-id', created_at: object.created_at }
+  return {
+    getObjects: vi.fn(async () => []), getObject: vi.fn(async () => object),
+    getTasks: vi.fn(async () => []), getTask: vi.fn(async () => task),
+    getExecutors: vi.fn(async () => [{ id: 'executor-id', email: 'executor-a@mini-crm.test' }]),
+    createObject: vi.fn(async () => object), updateObject: vi.fn(async () => object), deleteObject: vi.fn(async () => {}),
+    createTask: vi.fn(async () => task), updateTask: vi.fn(async () => task), deleteTask: vi.fn(async () => {}),
+  }
+})
 
 const managerSession = { user: { id: 'manager-id', email: 'manager@mini-crm.test' }, access_token: 'test-token' } as Session
 const executorSession = { user: { id: 'executor-id', email: 'executor-a@mini-crm.test' }, access_token: 'other-token' } as Session
@@ -62,6 +76,58 @@ async function fillLogin() {
 }
 
 describe('Authentication and routing', () => {
+  it('loads business queries under StrictMode', async () => {
+    const fake = fakeClient(managerSession)
+    render(<StrictMode><MemoryRouter initialEntries={['/objects']}><AuthProvider client={fake.client}><App /></AuthProvider></MemoryRouter></StrictMode>)
+    expect(await screen.findByText('Доступных объектов пока нет.')).toBeInTheDocument()
+  })
+
+  it('does not reuse manager data after switching accounts', async () => {
+    vi.mocked(crm.getObjects).mockResolvedValueOnce([{ id: 'private-object', name: 'Скрытая стройка', address: 'Адрес', created_at: '2026-11-05T00:00:00Z' }]).mockResolvedValueOnce([])
+    const { fake } = renderRoute('/objects', fakeClient(managerSession))
+    await screen.findByText('Скрытая стройка')
+    act(() => fake.emit(null))
+    await screen.findByRole('heading', { name: 'Вход' })
+    act(() => fake.emit(executorSession))
+    await screen.findByRole('heading', { name: 'Мои задачи' })
+    await userEvent.click(screen.getByRole('link', { name: 'Объекты' }))
+    expect(await screen.findByText('Доступных объектов пока нет.')).toBeInTheDocument()
+    expect(screen.queryByText('Скрытая стройка')).not.toBeInTheDocument()
+  })
+
+  it('creates an object and invalidates the list', async () => {
+    renderRoute('/objects', fakeClient(managerSession))
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: 'Создать объект' }))
+    await user.type(screen.getByLabelText('Название'), 'Новая стройка')
+    await user.type(screen.getByLabelText('Адрес'), 'Новый адрес')
+    await user.click(screen.getByRole('button', { name: 'Сохранить' }))
+    expect(await screen.findByRole('heading', { name: 'Карточка объекта' })).toBeInTheDocument()
+    expect(crm.createObject).toHaveBeenCalledWith({ name: 'Новая стройка', address: 'Новый адрес' })
+    expect(vi.mocked(crm.getObjects).mock.calls.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('requires confirmation before deleting an object', async () => {
+    renderRoute('/objects/object-123', fakeClient(managerSession))
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: 'Удалить объект' }))
+    expect(crm.deleteObject).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: 'Отмена' }))
+    expect(crm.deleteObject).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: 'Удалить объект' }))
+    await user.click(screen.getByRole('button', { name: 'Подтвердить удаление' }))
+    expect(await screen.findByRole('heading', { name: 'Объекты' })).toBeInTheDocument()
+    expect(crm.deleteObject).toHaveBeenCalledWith('object-123')
+  })
+
+  it('does not show CRUD actions to an executor', async () => {
+    renderRoute('/objects/object-123', fakeClient(executorSession))
+    await screen.findByText('Объект теста')
+    expect(screen.queryByRole('button', { name: 'Редактировать объект' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Удалить объект' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Создать задачу' })).not.toBeInTheDocument()
+  })
+
   it('signs in and loads the manager profile', async () => {
     const { fake } = renderRoute('/login')
     await fillLogin()

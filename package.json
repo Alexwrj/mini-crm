@@ -14,10 +14,13 @@
     "check": "npm run typecheck && npm run lint && npm run test && npm run build",
     "auth:seed": "node scripts/seed-auth-users.mjs",
     "test:auth-api": "node scripts/test-auth-api.mjs",
-    "test:auth-isolated": "node scripts/test-auth-isolated.mjs"
+    "test:auth-isolated": "node scripts/test-auth-isolated.mjs",
+    "test:crud-api": "node scripts/test-crud-api.mjs",
+    "test:crud-isolated": "node scripts/test-auth-isolated.mjs --crud"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.119.0",
+    "@tanstack/react-query": "^5.106.1",
     "class-variance-authority": "^0.7.1",
     "cn": "^0.5.2",
     "lucide-react": "^1.69.0",

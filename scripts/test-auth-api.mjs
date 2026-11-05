@@ -44,7 +44,9 @@ for (const account of local.accounts) {
   check(!metadata.error, `${account.email}: user metadata editable (not trusted for roles)`)
   const unchanged = await client.from('profiles').select('role').eq('id', account.id).single()
   check(!unchanged.error && unchanged.data.role === account.role, `${account.email}: metadata cannot change database role`)
-  for (const table of ['objects', 'tasks', 'task_status_history']) {
+  // Stage 3A's all-business-closed assertions apply only to that baseline.
+  // Current business permissions are covered by test-crud-api with fixtures.
+  for (const table of process.env.SUPABASE_AUTH_BASELINE === '1' ? ['objects', 'tasks', 'task_status_history'] : []) {
     const operations = [
       ['select', () => client.from(table).select('*')],
       ['insert', () => client.from(table).insert({})],

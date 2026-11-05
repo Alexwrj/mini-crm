@@ -119,3 +119,30 @@ create policy profiles_select_own on public.profiles
 Владелец/административный Auth-скрипт может создать профиль при заведении аккаунта.
 Бизнес-таблицы остаются полностью закрытыми. SECURITY DEFINER и новые функции
 в миграции не создаются. Матрица прав на бизнес-данные — предмет Stage 3B.
+
+
+## Stage 3B + 4: доступ к объектам и задачам
+
+Новая миграция 20261105020000_business_crud_access.sql не меняет состав таблиц,
+FK, индексы или CHECK. Она добавляет:
+
+- objects: SELECT manager либо наличие своей видимой задачи; INSERT/UPDATE/DELETE
+  только manager. INSERT/UPDATE разрешены только для name/address.
+- tasks: SELECT manager либо назначенный executor. UPDATE title/description и
+  DELETE только manager. Прямой INSERT запрещён всем клиентским ролям.
+- create_task RPC: manager создаёт задачу с server-side author_id=auth.uid(),
+  status=new, проверенным executor; UUID/time генерирует БД. На executor-строку
+  берётся FOR SHARE до конца транзакции, чтобы роль не менялась во время создания.
+- list_executors RPC: только manager получает UUID/email профилей executor;
+  собственная policy profiles не расширяется и не становится рекурсивной.
+
+Все служебные поля задач, включая status/author_id/assignee_id/object_id/id/created_at,
+не имеют клиентского UPDATE. У объектов не обновляются id/created_at. История
+остаётся без клиентских прав. CASCADE проверен реальным запросом manager,
+а не только административным удалением. Security-definer функции имеют фиксированный
+search_path='', проверку caller/роли и закрытый EXECUTE для PUBLIC/anon.
+
+На tasks нет policy, обращающейся к objects: цепь RLS objects → tasks → profiles
+не образует цикл. Роль читается из profiles, user_metadata не учитывается.
+Роли/права выдаются для authenticated, anon не получает доступ.
+Переназначение существующей задачи и workflow остаются будущим этапом.

@@ -1,5 +1,5 @@
 import { Placeholder } from '../shared/ui/Placeholder'
-import { useState, type FormEvent } from 'react'
+import { useState, type SubmitEvent } from 'react'
 import { Navigate } from 'react-router'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -15,7 +15,7 @@ export function LoginPage() {
   if (state.status === 'loading' || state.status === 'error') return <AuthStatus />
   if (state.status === 'authenticated') return <Navigate to={homeForRole(state.profile.role)} replace />
 
-  async function submit(event: FormEvent<HTMLFormElement>) {
+  async function submit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault()
     if (submitting) return
     const data = new FormData(event.currentTarget)

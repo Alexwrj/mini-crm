@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { useAuth } from '@/features/auth/model/auth-context'
 import { HomeRedirect, ProtectedRoutes } from '@/features/auth/ui/AuthGate'
+import { CrmRoutes } from './providers/CrmQueryProvider'
 
 function Layout() {
   const { state, signOut } = useAuth()
@@ -27,7 +28,6 @@ function Layout() {
         </nav>
       </header>
       <main id="main-content" className="mt-9">
-        <p className="my-4 leading-[1.6] text-muted-foreground">Stage 3A · Авторизация подключена. Доступ к бизнес-данным пока закрыт.</p>
         <Outlet />
       </main>
     </div>
@@ -41,10 +41,12 @@ export function App() {
         <Route index element={<HomeRedirect />} />
         <Route path="login" element={<LoginPage />} />
         <Route element={<ProtectedRoutes />}>
+          <Route element={<CrmRoutes />}>
           <Route path="objects" element={<ObjectsPage />} />
         <Route path="objects/:objectId" element={<ObjectPage />} />
         <Route path="tasks/:taskId" element={<TaskPage />} />
         <Route path="my-tasks" element={<MyTasksPage />} />
+          </Route>
         </Route>
         <Route path="*" element={<NotFoundPage />} />
       </Route>
