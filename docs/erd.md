@@ -1,7 +1,8 @@
-# ERD — схема Stage 2
+# ERD — схема Stage 2 и доступ к профилю Stage 3A
 
 Реализована миграцией `supabase/migrations/20261105000000_create_crm_schema.sql`.
-Схема подготовлена для Supabase; облачная база и клиент ещё не подключены.
+Схема подготовлена для Supabase; Stage 3A подключает Auth и чтение профиля
+через переменные окружения. Облачный проект этим этапом не разворачивается.
 `auth.users` — существующая таблица Supabase, миграция её не создаёт.
 
 ```mermaid
@@ -99,3 +100,22 @@ SELECT/INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER. Транзакция м
 атомарная история, комментарий возврата и переназначение будут проверяться
 в последующих этапах по [ADR-002](adr/ADR-002.md).
 Наличие NULL в `from_status` сейчас не привязано к событию создания.
+
+
+## Дополнение Stage 3A: чтение собственного профиля
+
+Состав таблиц, FK, индексов и CHECK не изменён. Новая миграция
+`20261105010000_allow_own_profile_read.sql` сохраняет RLS и добавляет только:
+
+```sql
+grant select (id, role) on public.profiles to authenticated;
+create policy profiles_select_own on public.profiles
+  for select to authenticated using (id = (select auth.uid()));
+```
+
+Все прежние клиентские привилегии profiles сначала отзываются. INSERT/UPDATE/DELETE
+не выдаются; anon не читает profiles, authenticated читает исключительно себя.
+Роль не берётся из user_metadata, JWT-метаданных приложения или email.
+Владелец/административный Auth-скрипт может создать профиль при заведении аккаунта.
+Бизнес-таблицы остаются полностью закрытыми. SECURITY DEFINER и новые функции
+в миграции не создаются. Матрица прав на бизнес-данные — предмет Stage 3B.

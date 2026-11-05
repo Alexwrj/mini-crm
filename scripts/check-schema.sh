@@ -35,8 +35,8 @@ db_user="$(id -un)"
 psql_args=(-X -v ON_ERROR_STOP=1 -h "$cluster_dir" -p 55432 -U "$db_user" -d postgres)
 psql "${psql_args[@]}" -c 'select version();'
 psql "${psql_args[@]}" -f "$project_dir/supabase/tests/stage2-bootstrap.sql"
-for migration in "$project_dir"/supabase/migrations/*.sql; do
-  psql "${psql_args[@]}" -f "$migration"
-done
+# This historical Stage 2 suite asserts zero policies; later policies are tested
+# against real Supabase, not against this minimal auth stub.
+psql "${psql_args[@]}" -f "$project_dir/supabase/migrations/20261105000000_create_crm_schema.sql"
 psql "${psql_args[@]}" -f "$project_dir/supabase/tests/stage2-schema.sql"
 echo 'Stage 2 SQL checks passed. Disposable cluster will be removed.'
