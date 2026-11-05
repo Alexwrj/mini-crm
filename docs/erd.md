@@ -1,9 +1,10 @@
-# ERD — схема Stage 2 и доступ к профилю Stage 3A
+# ERD — текущая схема и доступ после Stage 5
 
-Реализована миграцией `supabase/migrations/20261105000000_create_crm_schema.sql`.
-Схема подготовлена для Supabase; Stage 3A подключает Auth и чтение профиля
-через переменные окружения. Облачный проект этим этапом не разворачивается.
-`auth.users` — существующая таблица Supabase, миграция её не создаёт.
+Таблицы созданы первой миграцией, последующие пять добавляют права и функции,
+не меняя структуру таблиц. Все версии находятся в [migrations](../supabase/migrations).
+Облачный проект в Stage 6A не разворачивается. `auth.users` принадлежит Supabase;
+прикладные миграции её не создают. Email читается из Auth через защищённые RPC,
+не является новым столбцом profiles/tasks/history.
 
 ```mermaid
 erDiagram
@@ -74,100 +75,60 @@ PK автоматически создают уникальные индексы
 | --- | --- | --- |
 | `objects_created_at_idx` | `created_at DESC, id` | список объектов по времени |
 | `tasks_object_id_created_at_idx` | `object_id, created_at DESC, id` | задачи объекта, FK/каскад |
-| `tasks_assignee_id_created_at_idx` | `assignee_id, created_at DESC, id` | мои задачи, FK, будущий RLS |
+| `tasks_assignee_id_created_at_idx` | `assignee_id, created_at DESC, id` | мои задачи, FK, RLS |
 | `tasks_author_id_idx` | `author_id` | FK автора |
 | `task_status_history_task_id_created_at_idx` | `task_id, created_at, id` | история задачи, FK/каскад |
 | `task_status_history_actor_id_idx` | `actor_id` | FK участника истории |
 
 Каждый FK покрыт индексом с нужной первой колонкой, включая PK `profiles.id`.
 Отдельный индекс статусов пока не вводится: его необходимость определяется
-конкретными запросами следующих этапов.
+реальной нагрузкой, отдельного фильтра статусов сейчас нет.
 
-## Состояние безопасности на Stage 2
+## Текущие права и операции
 
-На всех четырёх прикладных таблицах включён RLS. Policies отсутствуют.
-Все табличные привилегии отозваны у PUBLIC, anon, authenticated, включая
-SELECT/INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER. Транзакция миграции
-не публикует промежуточное состояние с незакрытыми таблицами.
+На profiles, objects, tasks и task_status_history включён RLS; FORCE RLS нет.
+Anon/PUBLIC не имеют табличных прав. Authenticated читает только свой профиль;
+клиентское изменение профиля/роли не разрешено.
 
-Владельцу таблиц/администратору доступен SQL для миграций; FORCE RLS не включён.
-Глобальные default privileges существующего Supabase-проекта не меняются:
-отозваны привилегии только на четырёх созданных таблицах.
+Manager читает все объекты/задачи. Executor читает только назначенные задачи и
+объекты с ними. Objects INSERT/UPDATE разрешены manager только для name/address;
+tasks UPDATE — manager только для title/description. Удаление объектов/задач —
+manager с сохранением CASCADE. Прямой INSERT tasks и UPDATE служебных полей запрещены.
 
-Функций, триггеров и API изменения статусов нет. CHECK ограничивает набор значений,
-но не переходы. Администратор может указать любой допустимый статус/автора/actor
-и явное время; роли assignee/author, начальный статус, неизменяемость аудита,
-атомарная история, комментарий возврата и переназначение будут проверяться
-в последующих этапах по [ADR-002](adr/ADR-002.md).
-Наличие NULL в `from_status` сейчас не привязано к событию создания.
+История: authenticated имеет SELECT с history_select_visible_task по видимой
+строке tasks; прямых клиентских INSERT/UPDATE/DELETE/TRUNCATE нет. Цепочки policies
+objects → tasks → profiles и history → tasks → profiles ацикличны.
 
+## RPC и аудит
 
-## Дополнение Stage 3A: чтение собственного профиля
+- create_task: manager, проверенный executor, author_id=auth.uid(), status=new;
+  задача и событие NULL → new создаются атомарно.
+- transition_task: точная матрица переходов и комментарий возврата, FOR UPDATE,
+  атомарный статус/история. Accepted терминальный.
+- reassign_task: manager, новый профиль executor, FOR UPDATE задачи/FOR SHARE
+  профиля. Любой статус, включая accepted; статус и история сохраняются.
+  Тот же исполнитель — no-op без UPDATE.
+- list_executors: manager-only список id/email для выбора исполнителя.
+- read_task: доступная задача с author_email/assignee_email.
+- read_task_history: доступная история с actor_email, created_at ASC/id ASC.
 
-Состав таблиц, FK, индексов и CHECK не изменён. Новая миграция
-`20261105010000_allow_own_profile_read.sql` сохраняет RLS и добавляет только:
+Все функции SECURITY DEFINER, search_path пуст, PUBLIC/anon не имеют EXECUTE.
+Проверки роли и доступа внутри RPC обязательны, поскольку владелец обходит RLS.
+Пять функций явно принадлежат postgres; list_executors — роли применения миграции.
+Перед релизом проверяются фактические владельцы всех функций.
 
-```sql
-grant select (id, role) on public.profiles to authenticated;
-create policy profiles_select_own on public.profiles
-  for select to authenticated using (id = (select auth.uid()));
-```
+Автор и время истории задаются сервером: actor_id=auth.uid(),
+created_at=clock_timestamp(). У старых задач может не быть первичного события;
+backfill не выполнялся. CHECK статуса сам по себе ограничивает только значение,
+а переходы защищает transition_task и отсутствие прямого UPDATE-grant.
+На уровне таблицы from_status всё ещё допускает NULL, description/comment — пустоту;
+непустой комментарий rework проверяет RPC.
 
-Все прежние клиентские привилегии profiles сначала отзываются. INSERT/UPDATE/DELETE
-не выдаются; anon не читает profiles, authenticated читает исключительно себя.
-Роль не берётся из user_metadata, JWT-метаданных приложения или email.
-Владелец/административный Auth-скрипт может создать профиль при заведении аккаунта.
-Бизнес-таблицы остаются полностью закрытыми. SECURITY DEFINER и новые функции
-в миграции не создаются. Матрица прав на бизнес-данные — предмет Stage 3B.
+Переназначение меняет доступ к задаче и всей истории при новых запросах.
+Прежний исполнитель не видит их, новый получает и прошлые события. Отдельной
+истории назначений/редактирования полей нет. Уже загруженные страницы без
+Realtime сами не очищаются. Администратор и service_role находятся вне обычной
+модели пользовательских прав и могут изменять данные напрямую.
 
-
-## Stage 3B + 4: доступ к объектам и задачам
-
-Новая миграция 20261105020000_business_crud_access.sql не меняет состав таблиц,
-FK, индексы или CHECK. Она добавляет:
-
-- objects: SELECT manager либо наличие своей видимой задачи; INSERT/UPDATE/DELETE
-  только manager. INSERT/UPDATE разрешены только для name/address.
-- tasks: SELECT manager либо назначенный executor. UPDATE title/description и
-  DELETE только manager. Прямой INSERT запрещён всем клиентским ролям.
-- create_task RPC: manager создаёт задачу с server-side author_id=auth.uid(),
-  status=new, проверенным executor; UUID/time генерирует БД. На executor-строку
-  берётся FOR SHARE до конца транзакции, чтобы роль не менялась во время создания.
-- list_executors RPC: только manager получает UUID/email профилей executor;
-  собственная policy profiles не расширяется и не становится рекурсивной.
-
-Все служебные поля задач, включая status/author_id/assignee_id/object_id/id/created_at,
-не имеют клиентского UPDATE. У объектов не обновляются id/created_at. История
-остаётся без клиентских прав. CASCADE проверен реальным запросом manager,
-а не только административным удалением. Security-definer функции имеют фиксированный
-search_path='', проверку caller/роли и закрытый EXECUTE для PUBLIC/anon.
-
-На tasks нет policy, обращающейся к objects: цепь RLS objects → tasks → profiles
-не образует цикл. Роль читается из profiles, user_metadata не учитывается.
-Роли/права выдаются для authenticated, anon не получает доступ.
-Переназначение существующей задачи и workflow остаются будущим этапом.
-
-
-## Stage 5: жизненный цикл и чтение истории
-
-Миграция 20261105030000_task_workflow.sql сохраняет таблицы, FK, CHECK и индексы.
-Старые миграции не переписаны. Изменяется только логика RPC и привилегия чтения:
-
-- create_task добавляет NULL → new в той же транзакции. Старые задачи не backfill.
-- transition_task проверяет роль/назначение и матрицу переходов, блокирует tasks
-  FOR UPDATE, затем атомарно меняет статус и пишет историю. Возврат rework требует
-  хотя бы одного непробельного символа в комментарии.
-- reassign_task выполняется только manager, новый профиль — executor. Такая же
-  блокировка tasks сериализует переназначение с переходами. Любой статус допустим,
-  прежний статус и история сохраняются. То же назначение не делает UPDATE.
-- actor_id=auth.uid(), created_at=clock_timestamp() после получения блокировки;
-  браузер не передаёт их. Время не берётся из начала ожидавшей блокировку транзакции.
-- authenticated имеет только SELECT истории с policy history_select_visible_task:
-  EXISTS видимой по собственному RLS строки tasks. Anon не имеет чтения.
-- История сортируется created_at ASC, id ASC. Все прямые клиентские I/U/D/TRUNCATE
-  истории и PATCH tasks.status/assignee_id остаются запрещены.
-- Владельцы create_task/transition_task/reassign_task явно postgres, search_path='';
-  EXECUTE отозван у PUBLIC/anon и выдан authenticated с внутренней проверкой роли.
-
-История присваиваний/редактирования полей не вводится. CASCADE истории при удалении
-задачи/объекта сохраняется и проверен через manager JWT на новой схеме.
+Детали сигнатур, policies и grants: [security-model](security-model.md).
+Решения: [ADR-002](adr/ADR-002.md), [ADR-003](adr/ADR-003.md).
